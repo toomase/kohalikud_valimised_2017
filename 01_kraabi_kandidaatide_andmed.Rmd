@@ -1,0 +1,129 @@
+---
+title: "Kraabi kandidaatide andmed"
+output: html_notebook
+---
+
+Kraabi kõigi kandidaatide andmed lehelt [https://kov2017.valimised.ee/kandidaadid](https://kov2017.valimised.ee/kandidaadid) 
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(stringr)
+library(janitor)
+```
+
+Leia iga maakonna ja Tartu/Tallinna kandidaatide lingid
+```{r}
+kandidaadid_maakonnad_url <- "https://kov2017.valimised.ee/kandidaadid"
+
+maakonnad_lingid <- read_html(kandidaadid_maakonnad_url) %>% 
+  html_nodes(".listing .listing a") %>% 
+  html_attr("href") %>% 
+  str_c("https://kov2017.valimised.ee", .)
+```
+
+Funktsioon, mis leiab iga valimisringkonna lingi
+```{r}
+kraabi_valimisringonna_lingid <- function(x){
+  x %>% 
+    head(1) %>% 
+    read_html() %>% 
+    html_nodes(".listing .listing .listing a") %>% 
+    html_attr("href") %>% 
+    str_c("https://kov2017.valimised.ee", .)
+}
+```
+
+Leia kõigi valimisringkondade lingid
+```{r}
+valimisringkonna_lingid <- map(maakonnad_lingid, kraabi_valimisringonna_lingid)
+```
+
+Kombineeri valimisringkondade lingid ja maakondade lingid kokku
+Nendelt linkidelt saab siis kraapida kandidaatide nimekirjad
+```{r}
+kov_lingid <- valimisringkonna_lingid %>% 
+  unlist() %>% 
+  c(., maakonnad_lingid)
+```
+
+Funktsioon iga kandidaadi lingi kraapimiseks
+```{r}
+kraabi_kandidaadi_lingid <- function(x){
+  x %>% 
+    read_html() %>% 
+    html_nodes(".party-members a") %>% 
+    html_attr("href") %>% 
+    str_c("https://kov2017.valimised.ee/", .)
+}
+```
+
+Kraabi kõigi kandidaatide personaalse lehe lingid
+```{r}
+kandidaadi_lingid_raw <- map(kov_lingid, kraabi_kandidaadi_lingid)
+```
+
+Kandidaatide lingid vektoriks
+```{r}
+kandidaadi_lingid <- kandidaadi_lingid_raw %>% 
+  unlist() %>% 
+  unique()
+```
+
+Funktsioon, mis kraabib iga kandidaadi kohta kogu info
+```{r}
+kraabi_kandidaadi_info <- function(x){
+  kandidaadi_html <- x %>% 
+    read_html()
+
+  piirkond <- kandidaadi_html %>% 
+    html_nodes(".m-0") %>% 
+    html_text()
+
+  nimi <- kandidaadi_html %>% 
+    html_nodes(".uppercase") %>% 
+    html_text()
+
+  info <- kandidaadi_html %>% 
+    html_table() %>%
+    as.data.frame() %>% 
+    spread(X1, X2) %>% 
+    clean_names()
+  
+  kandidaat <- info %>% 
+    mutate(nimi = nimi, piirkond = piirkond, kandidaadi_link = x)
+  
+  return(kandidaat)
+}
+
+# Juhul kui tulemust pole, siis ära anna errorit vaid NULL väärtus
+kraabi_kandidaadi_info_errorita <- possibly(kraabi_kandidaadi_info, NULL)
+```
+
+Kraabi kõigi kandidaatide info
+Pikem protsess, mis võtab ca 2h aega
+```{r}
+system.time(
+kandidaadid_raw <- map_df(kandidaadi_lingid, kraabi_kandidaadi_info_errorita))
+```
+
+Töötle kandidaatite andmeid
+```{r}
+kandidaadid <- kandidaadid_raw %>% 
+  rename(nimekiri_voi_yksikkandidaat = nimekiri_või_üksikkandidaat,
+         synniaeg = sünniaeg,
+         tookoht_ja_amet = töökoht_ja_amet) %>% 
+  mutate(erakondlik_kuuluvus = ifelse(str_to_lower(erakondlik_kuuluvus) %in% c("puudub", "", "parteitu",
+                                                                               "-"), NA, erakondlik_kuuluvus),
+         haridus = ifelse(haridus == "Põhihariduseta", "Algharidus",
+                          ifelse(haridus == "", NA, haridus)),
+         synniaeg = as.Date(synniaeg, "%d.%m.%Y"),
+         piirkond = str_replace(piirkond, " - kandi.*", "")) %>% 
+  distinct(nimi, synniaeg, .keep_all = TRUE)
+```
+
+
+salvesta kandidaatide info edasises analüüsis kasutamiseks
+```{r}
+save(kandidaadid, file = "output/kandidaadid.RData")
+```

@@ -1,0 +1,50 @@
+---
+title: "Kraabi erakonnaliikmete andmed"
+output: html_notebook
+---
+
+Lae Äriregistrist kõikide erakondade liikmete nimekirjade csv failid ja koosta üks erakonnaliikmete tabel.
+[https://ariregister.rik.ee/erakonnad?lang=est](https://ariregister.rik.ee/erakonnad?lang=est)
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(stringr)
+library(janitor)
+```
+
+
+```{r}
+erakonnad_url <- "https://ariregister.rik.ee/erakonnad?lang=est"
+```
+
+Genereeri lingid iga erakonna nimekirja csv failiga
+```{r}
+erakonna_csv_lingid <- erakonnad_url %>% 
+  read_html() %>% 
+  html_nodes(".tbl_listing:nth-child(2) .subpagelink") %>% 
+  html_attr("href") %>% 
+  str_c("https://ariregister.rik.ee", ., "&csv=1&nolimit=1")
+```
+
+Lae kõik csv failid ühte tabelisse kokku
+```{r}
+erakonnaliikmed_raw <- map_df(erakonna_csv_lingid, read_csv2)
+```
+
+Töötle erakonnaliikmete nimekirja
+```{r}
+erakonnaliikmed <- erakonnaliikmed_raw %>% 
+  clean_names() %>% 
+  rename(synniaeg = sünniaeg,
+         liikmelisuse_loppemise_aeg = liikmelisuse_lõppemise_aeg) %>% 
+  mutate(liikmeks_astumise_aeg = as.Date(liikmeks_astumise_aeg, "%d.%m.%Y"),
+         synniaeg = as.Date(synniaeg, "%d.%m.%Y")) %>% 
+  select(-liikmelisuse_loppemise_aeg, -erakondliku_kuuluvuse_peatamine)
+```
+
+Salvesta erakonnaliikmete tabel
+```{r}
+save(erakonnaliikmed, file = "output/erakonnaliikmed.RData")
+```
+
